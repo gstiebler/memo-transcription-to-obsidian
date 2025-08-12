@@ -18,6 +18,17 @@ class Config:
         self.notes_folder = os.environ.get("OBSIDIAN_NOTES_FOLDER", "notes/memos")
         self.voice_memos_path = Path("/Users/guistiebler/Library/Group Containers/group.com.apple.VoiceMemos.shared/Recordings")
         
+        # Parse date filter if provided
+        date_filter_str = os.environ.get("PROCESS_FILES_AFTER_DATE")
+        if date_filter_str:
+            try:
+                self.process_after_date = datetime.strptime(date_filter_str, "%Y-%m-%d")
+                print(f"Processing files created after: {self.process_after_date.strftime('%Y-%m-%d')}")
+            except ValueError:
+                raise ValueError(f"PROCESS_FILES_AFTER_DATE '{date_filter_str}' must be in YYYY-MM-DD format")
+        else:
+            self.process_after_date = None
+        
         if not self.openai_api_key:
             raise ValueError("OPENAI_API_KEY environment variable is not set")
         if not self.obsidian_vault_path or not self.obsidian_vault_path.exists():
@@ -72,6 +83,13 @@ class MemoProcessor:
         unprocessed = []
         
         for memo_file in memo_files:
+            # Check date filter first
+            if self.config.process_after_date:
+                creation_date = self.get_file_creation_date(memo_file)
+                if creation_date < self.config.process_after_date:
+                    continue  # Skip files created before the cutoff date
+            
+            # Check if already processed
             file_hash = self._get_file_hash(memo_file)
             if file_hash not in self.processed_files:
                 unprocessed.append(memo_file)
@@ -118,7 +136,10 @@ Please respond in JSON format with keys: "filename_summary", "summary", "title".
                 response_format={ "type": "json_object" }
             )
             
-            result = json.loads(response.choices[0].message.content)
+            content = response.choices[0].message.content
+            if content is None:
+                raise ValueError("No content in API response")
+            result = json.loads(content)
             return result
         except Exception as e:
             print(f"Error generating summary: {e}")
@@ -276,6 +297,7 @@ def main():
         print("  - OBSIDIAN_ATTACHMENTS_FOLDER (optional)")
         print("  - OBSIDIAN_DIARY_FOLDER (optional)")
         print("  - OBSIDIAN_NOTES_FOLDER (optional)")
+        print("  - PROCESS_FILES_AFTER_DATE (optional, format: YYYY-MM-DD)")
     except Exception as e:
         print(f"Unexpected error: {e}")
         import traceback
