@@ -25,6 +25,10 @@ class Config:
         self.notes_folder = os.environ.get("OBSIDIAN_NOTES_FOLDER", "notes/memos")
         self.voice_memos_path = Path("/Users/guistiebler/Library/Group Containers/group.com.apple.VoiceMemos.shared/Recordings")
         
+        # OpenAI model configuration
+        self.whisper_model = os.environ.get("OPENAI_WHISPER_MODEL", "whisper-1")
+        self.chat_model = os.environ.get("OPENAI_CHAT_MODEL", "gpt-4o-mini")
+        
         # Parse date filter if provided
         date_filter_str = os.environ.get("PROCESS_FILES_AFTER_DATE")
         if date_filter_str:
@@ -112,7 +116,7 @@ class MemoProcessor:
             try:
                 with open(audio_file, "rb") as f:
                     transcript = self.client.audio.transcriptions.create(
-                        model="whisper-1",
+                        model=self.config.whisper_model,
                         file=f,
                         response_format="text"
                     )
@@ -125,7 +129,7 @@ class MemoProcessor:
         with console.status("[bold blue]Generating summary and title...[/bold blue]", spinner="dots"):
             try:
                 response = self.client.chat.completions.create(
-                    model="gpt-4o-mini",
+                    model=self.config.chat_model,
                     messages=[
                         {
                             "role": "system",
@@ -213,7 +217,7 @@ Please respond in JSON format with keys: "filename_summary", "summary", "title".
         daily_note_path = self.config.diary_path / daily_note_filename
         
         relative_note_path = os.path.relpath(note_path, self.config.obsidian_vault_path)
-        note_link = f"- [[{relative_note_path.replace('.md', '')}]]"
+        note_link = f"![[{relative_note_path.replace('.md', '')}]]"
         
         with console.status("[bold cyan]Updating daily note...", spinner="dots"):
             if daily_note_path.exists():
@@ -222,9 +226,9 @@ Please respond in JSON format with keys: "filename_summary", "summary", "title".
                 
                 if "## Voice Memos" not in content:
                     content += "\n\n## Voice Memos\n"
-                
-                content += f"{note_link}\n"
-                
+
+                content += f"{note_link}\n\n"
+
                 with open(daily_note_path, 'w', encoding='utf-8') as f:
                     f.write(content)
                 console.print(f"  [green]✓[/green] Updated daily note: [italic]{daily_note_filename}[/italic]")
