@@ -116,11 +116,11 @@ Copied to `{vault}/attachments/` with naming pattern:
 ## How It Works
 
 1. **Discovery**: Scans Apple Voice Memos directory for `.m4a` files
-2. **Filtering**: Checks creation date and processing cache
-3. **Transcription**: Uses OpenAI Whisper API for speech-to-text
-4. **Summarization**: GPT-4o-mini generates title and summary
-5. **Organization**: Creates structured notes and updates daily entries
-6. **Caching**: Maintains `.memo_processor_cache.json` to track processed files
+2. **Duplicate Detection**: Checks MD5 hashes against existing files in attachments folder
+3. **Date Filtering**: Skips files created before the configured date (if set)
+4. **Transcription**: Uses OpenAI Whisper API for speech-to-text
+5. **Summarization**: GPT-4o-mini generates title and summary
+6. **Organization**: Creates structured notes and updates daily entries
 
 ## Development
 
@@ -165,7 +165,7 @@ mise install
 - API keys are stored locally in `.env` (not committed to git)
 - Audio files remain on your local machine
 - Transcriptions are sent to OpenAI for processing
-- Processed file tracking uses MD5 hashes, not content
+- Duplicate detection uses MD5 hashes of actual file content
 
 ## License
 

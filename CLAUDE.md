@@ -18,7 +18,7 @@ This is a Python application that automatically transcribes Apple Voice Memos an
 2. **MemoProcessor Class** (`main.py:50-283`)
    - Main processing engine
    - Handles file discovery, transcription, and Obsidian integration
-   - Maintains a cache of processed files using MD5 hashing
+   - Detects duplicates by MD5 hashing existing files in attachments folder
    - Key methods:
      - `get_unprocessed_memos()`: Filters memos by date and processing status
      - `transcribe_audio()`: Uses OpenAI Whisper API
@@ -29,13 +29,14 @@ This is a Python application that automatically transcribes Apple Voice Memos an
 ### Data Flow
 
 1. Scan Apple Voice Memos directory (`/Users/guistiebler/Library/Group Containers/group.com.apple.VoiceMemos.shared/Recordings`)
-2. Filter by creation date (if `PROCESS_FILES_AFTER_DATE` is set)
-3. Check against processed files cache (`.memo_processor_cache.json` in Obsidian vault)
-4. Transcribe unprocessed audio using OpenAI Whisper
-5. Generate title and summary using GPT-4o-mini
-6. Copy audio file to Obsidian attachments with descriptive name
-7. Create markdown note with transcription
-8. Update or create daily diary note with reference
+2. Scan Obsidian attachments folder and hash existing audio files
+3. Filter by creation date (if `PROCESS_FILES_AFTER_DATE` is set)
+4. Check memo hashes against existing file hashes to detect duplicates
+5. Transcribe unprocessed audio using OpenAI Whisper
+6. Generate title and summary using GPT-4o-mini
+7. Copy audio file to Obsidian attachments with descriptive name
+8. Create markdown note with transcription
+9. Update or create daily diary note with reference
 
 ## Development Commands
 
@@ -70,9 +71,9 @@ The application creates:
 - Memo notes: `{vault}/notes/memos/{timestamp}_{title}.md`
 - Daily notes: `{vault}/diary/{YYYY-MM-DD}.md`
 
-## Processing State
+## Duplicate Detection
 
-The application maintains state in `{vault}/.memo_processor_cache.json` containing MD5 hashes of processed files. This prevents reprocessing of memos even if they're renamed or moved.
+The application scans the attachments folder and computes MD5 hashes of existing audio files to prevent reprocessing. This ensures memos are not duplicated even if they're renamed or moved.
 
 ## Error Handling
 
