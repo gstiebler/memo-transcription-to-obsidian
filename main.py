@@ -23,7 +23,7 @@ class Config:
         self.attachments_folder = os.environ.get("OBSIDIAN_ATTACHMENTS_FOLDER", "attachments")
         self.diary_folder = os.environ.get("OBSIDIAN_DIARY_FOLDER", "diary")
         self.notes_folder = os.environ.get("OBSIDIAN_NOTES_FOLDER", "notes/memos")
-        self.voice_memos_path = Path("/Users/guistiebler/Library/Group Containers/group.com.apple.VoiceMemos.shared/Recordings")
+        self.voice_memos_path = Path(os.environ.get("VOICE_MEMOS_PATH", "/Users/guistiebler/Library/Group Containers/group.com.apple.VoiceMemos.shared/Recordings"))
         
         # OpenAI model configuration
         self.whisper_model = os.environ.get("OPENAI_WHISPER_MODEL", "whisper-1")

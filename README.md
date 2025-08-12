@@ -50,6 +50,7 @@ OBSIDIAN_VAULT_PATH=/path/to/your/obsidian/vault
 OBSIDIAN_ATTACHMENTS_FOLDER=attachments
 OBSIDIAN_DIARY_FOLDER=diary
 OBSIDIAN_NOTES_FOLDER=notes/memos
+VOICE_MEMOS_PATH=/path/to/voice/memos/directory
 PROCESS_FILES_AFTER_DATE=2024-01-01
 OPENAI_WHISPER_MODEL=whisper-1
 OPENAI_CHAT_MODEL=gpt-4o-mini
@@ -64,6 +65,7 @@ OPENAI_CHAT_MODEL=gpt-4o-mini
 | `OBSIDIAN_ATTACHMENTS_FOLDER` | No | Folder for audio files (relative to vault) | `attachments` |
 | `OBSIDIAN_DIARY_FOLDER` | No | Folder for daily notes (relative to vault) | `diary` |
 | `OBSIDIAN_NOTES_FOLDER` | No | Folder for memo notes (relative to vault) | `notes/memos` |
+| `VOICE_MEMOS_PATH` | No | Path to Apple Voice Memos directory | `/Users/username/Library/Group Containers/group.com.apple.VoiceMemos.shared/Recordings` |
 | `PROCESS_FILES_AFTER_DATE` | No | Only process files created after this date (YYYY-MM-DD) | - |
 | `OPENAI_WHISPER_MODEL` | No | OpenAI model for audio transcription | `whisper-1` |
 | `OPENAI_CHAT_MODEL` | No | OpenAI model for summarization and title generation | `gpt-4o-mini` |
