@@ -5,8 +5,10 @@ from datetime import datetime
 from typing import List, Dict
 import hashlib
 import json
+from abc import ABC, abstractmethod
 
 from openai import OpenAI
+import google.generativeai as genai
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
@@ -18,16 +20,28 @@ console = Console()
 
 class Config:
     def __init__(self):
+        # API Provider selection
+        self.api_provider = os.environ.get("API_PROVIDER", "openai").lower()
+        
+        # API Keys
         self.openai_api_key = os.environ.get("OPENAI_API_KEY")
+        self.gemini_api_key = os.environ.get("GEMINI_API_KEY")
+        
+        # Obsidian paths
         self.obsidian_vault_path = Path(os.environ.get("OBSIDIAN_VAULT_PATH", ""))
         self.attachments_folder = os.environ.get("OBSIDIAN_ATTACHMENTS_FOLDER", "attachments")
         self.diary_folder = os.environ.get("OBSIDIAN_DIARY_FOLDER", "diary")
         self.notes_folder = os.environ.get("OBSIDIAN_NOTES_FOLDER", "notes/memos")
         self.voice_memos_path = Path(os.environ.get("VOICE_MEMOS_PATH", "/Users/guistiebler/Library/Group Containers/group.com.apple.VoiceMemos.shared/Recordings"))
         
-        # OpenAI model configuration
-        self.whisper_model = os.environ.get("OPENAI_WHISPER_MODEL", "whisper-1")
-        self.chat_model = os.environ.get("OPENAI_CHAT_MODEL", "gpt-4o-mini")
+        # Model configuration
+        if self.api_provider == "openai":
+            self.whisper_model = os.environ.get("OPENAI_WHISPER_MODEL", "whisper-1")
+            self.chat_model = os.environ.get("OPENAI_CHAT_MODEL", "gpt-4o-mini")
+        elif self.api_provider == "gemini":
+            self.gemini_model = os.environ.get("GEMINI_MODEL", "gemini-1.5-flash")
+        else:
+            raise ValueError(f"Invalid API_PROVIDER: {self.api_provider}. Must be 'openai' or 'gemini'")
         
         # Parse date filter if provided
         date_filter_str = os.environ.get("PROCESS_FILES_AFTER_DATE")
@@ -40,8 +54,11 @@ class Config:
         else:
             self.process_after_date = None
         
-        if not self.openai_api_key:
+        # Validate configuration
+        if self.api_provider == "openai" and not self.openai_api_key:
             raise ValueError("OPENAI_API_KEY environment variable is not set")
+        if self.api_provider == "gemini" and not self.gemini_api_key:
+            raise ValueError("GEMINI_API_KEY environment variable is not set")
         if not self.obsidian_vault_path or not self.obsidian_vault_path.exists():
             raise ValueError(f"OBSIDIAN_VAULT_PATH '{self.obsidian_vault_path}' does not exist")
         if not self.voice_memos_path.exists():
@@ -60,10 +77,9 @@ class Config:
         return self.obsidian_vault_path / self.notes_folder
 
 
-class MemoProcessor:
+class BaseMemoProcessor(ABC):
     def __init__(self, config: Config):
         self.config = config
-        self.client = OpenAI(api_key=config.openai_api_key)
         self._ensure_folders_exist()
         self._load_processed_files()
     
@@ -111,54 +127,13 @@ class MemoProcessor:
         
         return unprocessed
     
+    @abstractmethod
     def transcribe_audio(self, audio_file: Path) -> str:
-        with console.status(f"[bold blue]Transcribing {audio_file.name}...[/bold blue]", spinner="dots"):
-            try:
-                with open(audio_file, "rb") as f:
-                    transcript = self.client.audio.transcriptions.create(
-                        model=self.config.whisper_model,
-                        file=f,
-                        response_format="text"
-                    )
-                return transcript
-            except Exception as e:
-                console.print(f"[red]Error transcribing {audio_file.name}: {e}[/red]")
-                raise
+        pass
     
+    @abstractmethod
     def generate_summary_and_title(self, transcription: str) -> Dict[str, str]:
-        with console.status("[bold blue]Generating summary and title...[/bold blue]", spinner="dots"):
-            try:
-                response = self.client.chat.completions.create(
-                    model=self.config.chat_model,
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": "You are a helpful assistant that creates concise summaries and titles for voice memos."
-                        },
-                        {
-                            "role": "user",
-                            "content": f"""Based on this transcription, provide:
-1. A one-line summary (max 50 characters, suitable for a filename)
-2. A longer summary (2-3 sentences)
-3. A title for the note
-
-Transcription:
-{transcription}
-
-Please respond in JSON format with keys: "filename_summary", "summary", "title"."""
-                        }
-                    ],
-                    response_format={ "type": "json_object" }
-                )
-                
-                content = response.choices[0].message.content
-                if content is None:
-                    raise ValueError("No content in API response")
-                result = json.loads(content)
-                return result
-            except Exception as e:
-                console.print(f"[red]Error generating summary: {e}[/red]")
-                raise
+        pass
     
     def sanitize_filename(self, filename: str) -> str:
         invalid_chars = '<>:"/\\|?*'
@@ -325,15 +300,162 @@ Please respond in JSON format with keys: "filename_summary", "summary", "title".
         console.print(summary)
 
 
+class OpenAIMemoProcessor(BaseMemoProcessor):
+    def __init__(self, config: Config):
+        super().__init__(config)
+        self.client = OpenAI(api_key=config.openai_api_key)
+    
+    def transcribe_audio(self, audio_file: Path) -> str:
+        with console.status(f"[bold blue]Transcribing {audio_file.name} with OpenAI...[/bold blue]", spinner="dots"):
+            try:
+                with open(audio_file, "rb") as f:
+                    transcript = self.client.audio.transcriptions.create(
+                        model=self.config.whisper_model,
+                        file=f,
+                        response_format="text"
+                    )
+                return transcript
+            except Exception as e:
+                console.print(f"[red]Error transcribing {audio_file.name}: {e}[/red]")
+                raise
+    
+    def generate_summary_and_title(self, transcription: str) -> Dict[str, str]:
+        with console.status("[bold blue]Generating summary and title with OpenAI...[/bold blue]", spinner="dots"):
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.config.chat_model,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "You are a helpful assistant that creates concise summaries and titles for voice memos."
+                        },
+                        {
+                            "role": "user",
+                            "content": f"""Based on this transcription, provide:
+1. A one-line summary (max 50 characters, suitable for a filename)
+2. A longer summary (2-3 sentences)
+3. A title for the note
+
+Transcription:
+{transcription}
+
+Please respond in JSON format with keys: "filename_summary", "summary", "title"."""
+                        }
+                    ],
+                    response_format={ "type": "json_object" }
+                )
+                
+                content = response.choices[0].message.content
+                if content is None:
+                    raise ValueError("No content in API response")
+                result = json.loads(content)
+                return result
+            except Exception as e:
+                console.print(f"[red]Error generating summary: {e}[/red]")
+                raise
+
+
+class GeminiMemoProcessor(BaseMemoProcessor):
+    def __init__(self, config: Config):
+        super().__init__(config)
+        genai.configure(api_key=config.gemini_api_key)
+        self.model = genai.GenerativeModel(config.gemini_model)
+    
+    def transcribe_audio(self, audio_file: Path) -> str:
+        with console.status(f"[bold blue]Transcribing {audio_file.name} with Gemini...[/bold blue]", spinner="dots"):
+            try:
+                # Upload the audio file to Gemini
+                with open(audio_file, "rb") as f:
+                    audio_data = f.read()
+                
+                # Create a temporary file object for Gemini
+                uploaded_file = genai.upload_file(str(audio_file), mime_type="audio/m4a")
+                
+                # Generate transcription using Gemini
+                prompt = "Please transcribe this audio file. Provide only the transcription text, nothing else."
+                response = self.model.generate_content([prompt, uploaded_file])
+                
+                # Clean up uploaded file
+                uploaded_file.delete()
+                
+                if response.text:
+                    return response.text.strip()
+                else:
+                    raise ValueError("No transcription generated")
+                    
+            except Exception as e:
+                console.print(f"[red]Error transcribing {audio_file.name}: {e}[/red]")
+                raise
+    
+    def generate_summary_and_title(self, transcription: str) -> Dict[str, str]:
+        with console.status("[bold blue]Generating summary and title with Gemini...[/bold blue]", spinner="dots"):
+            try:
+                prompt = f"""Based on this transcription, provide:
+1. A one-line summary (max 50 characters, suitable for a filename)
+2. A longer summary (2-3 sentences)
+3. A title for the note
+
+Transcription:
+{transcription}
+
+Please respond ONLY with valid JSON format with keys: "filename_summary", "summary", "title".
+Example response:
+{{"filename_summary": "Meeting notes about project", "summary": "Discussion about project timeline and deliverables.", "title": "Project Meeting Notes"}}"""
+
+                response = self.model.generate_content(
+                    prompt,
+                    generation_config=genai.GenerationConfig(
+                        temperature=0.3,
+                        response_mime_type="application/json"
+                    )
+                )
+                
+                if response.text:
+                    result = json.loads(response.text)
+                    return result
+                else:
+                    raise ValueError("No summary generated")
+                    
+            except json.JSONDecodeError as e:
+                console.print(f"[red]Error parsing JSON response: {e}[/red]")
+                console.print(f"[yellow]Raw response: {response.text}[/yellow]")
+                # Fallback: try to extract without JSON
+                return {
+                    "filename_summary": "voice_memo",
+                    "summary": transcription[:100] + "...",
+                    "title": "Voice Memo"
+                }
+            except Exception as e:
+                console.print(f"[red]Error generating summary: {e}[/red]")
+                raise
+
+
 def main():
     try:
         config = Config()
-        processor = MemoProcessor(config)
+        
+        # Select the appropriate processor based on API provider
+        if config.api_provider == "openai":
+            processor = OpenAIMemoProcessor(config)
+            console.print(f"[cyan]Using OpenAI API (Whisper + {config.chat_model})[/cyan]")
+        elif config.api_provider == "gemini":
+            processor = GeminiMemoProcessor(config)
+            console.print(f"[cyan]Using Gemini API ({config.gemini_model})[/cyan]")
+        else:
+            raise ValueError(f"Unknown API provider: {config.api_provider}")
+        
         processor.process_all_memos()
     except ValueError as e:
         console.print(f"[bold red]Configuration error:[/bold red] {e}")
         console.print("\n[yellow]Please ensure the following environment variables are set:[/yellow]")
-        console.print("  • OPENAI_API_KEY")
+        console.print("  • API_PROVIDER (optional, 'openai' or 'gemini', default: 'openai')")
+        console.print("  • For OpenAI:")
+        console.print("    - OPENAI_API_KEY")
+        console.print("    - OPENAI_WHISPER_MODEL (optional, default: 'whisper-1')")
+        console.print("    - OPENAI_CHAT_MODEL (optional, default: 'gpt-4o-mini')")
+        console.print("  • For Gemini:")
+        console.print("    - GEMINI_API_KEY")
+        console.print("    - GEMINI_MODEL (optional, default: 'gemini-1.5-flash')")
         console.print("  • OBSIDIAN_VAULT_PATH")
         console.print("  • OBSIDIAN_ATTACHMENTS_FOLDER (optional)")
         console.print("  • OBSIDIAN_DIARY_FOLDER (optional)")

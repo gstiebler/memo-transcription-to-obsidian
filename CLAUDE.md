@@ -4,27 +4,40 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Python application that automatically transcribes Apple Voice Memos and integrates them into an Obsidian vault. It processes audio files from the Apple Voice Memos directory, transcribes them using OpenAI's Whisper API, generates summaries, and creates organized notes in Obsidian.
+This is a Python application that automatically transcribes Apple Voice Memos and integrates them into an Obsidian vault. It processes audio files from the Apple Voice Memos directory, transcribes them using either OpenAI's Whisper API or Google's Gemini API, generates summaries, and creates organized notes in Obsidian.
 
 ## Architecture
 
 ### Core Components
 
-1. **Config Class** (`main.py:12-47`)
+1. **Config Class** (`main.py`)
    - Manages all environment variables and paths
+   - Supports API provider selection (OpenAI or Gemini)
    - Validates configuration on initialization
    - Provides computed properties for various Obsidian folders
 
-2. **MemoProcessor Class** (`main.py:50-283`)
-   - Main processing engine
-   - Handles file discovery, transcription, and Obsidian integration
+2. **BaseMemoProcessor Class** (Abstract Base Class)
+   - Defines the interface for memo processing
+   - Handles common functionality like file management and duplicate detection
    - Detects duplicates by MD5 hashing existing files in attachments folder
-   - Key methods:
-     - `get_unprocessed_memos()`: Filters memos by date and processing status
-     - `transcribe_audio()`: Uses OpenAI Whisper API
-     - `generate_summary_and_title()`: Uses GPT-4o-mini for summarization
-     - `create_obsidian_note()`: Generates markdown notes
-     - `update_daily_note()`: Links memos to daily diary entries
+
+3. **OpenAIMemoProcessor Class**
+   - Implements transcription using OpenAI Whisper API
+   - Uses GPT-4o-mini (or configured model) for summarization
+   - Inherits from BaseMemoProcessor
+
+4. **GeminiMemoProcessor Class**
+   - Implements transcription using Google Gemini API's audio capabilities
+   - Uses Gemini for both transcription and summarization
+   - Supports audio file upload and processing
+   - Inherits from BaseMemoProcessor
+
+Key methods (common to both processors):
+   - `get_unprocessed_memos()`: Filters memos by date and processing status
+   - `transcribe_audio()`: Transcribes audio (implementation varies by provider)
+   - `generate_summary_and_title()`: Generates summary (implementation varies by provider)
+   - `create_obsidian_note()`: Generates markdown notes
+   - `update_daily_note()`: Links memos to daily diary entries
 
 ### Data Flow
 
@@ -32,8 +45,8 @@ This is a Python application that automatically transcribes Apple Voice Memos an
 2. Scan Obsidian attachments folder and hash existing audio files
 3. Filter by creation date (if `PROCESS_FILES_AFTER_DATE` is set)
 4. Check memo hashes against existing file hashes to detect duplicates
-5. Transcribe unprocessed audio using OpenAI Whisper
-6. Generate title and summary using GPT-4o-mini
+5. Transcribe unprocessed audio using selected API provider (OpenAI Whisper or Gemini)
+6. Generate title and summary using selected API provider
 7. Copy audio file to Obsidian attachments with descriptive name
 8. Create markdown note with transcription
 9. Update or create daily diary note with reference
@@ -57,7 +70,19 @@ mise install
 
 The project uses `mise.toml` to load environment variables from `.env`. Required variables:
 
+### API Provider Selection
+- `API_PROVIDER`: Choose between "openai" or "gemini" (default: "openai")
+
+### For OpenAI Provider
 - `OPENAI_API_KEY`: OpenAI API key for transcription and summarization
+- `OPENAI_WHISPER_MODEL`: Whisper model to use (default: "whisper-1")
+- `OPENAI_CHAT_MODEL`: Chat model for summarization (default: "gpt-4o-mini")
+
+### For Gemini Provider
+- `GEMINI_API_KEY`: Google Gemini API key for transcription and summarization
+- `GEMINI_MODEL`: Gemini model to use (default: "gemini-1.5-flash")
+
+### Obsidian Configuration
 - `OBSIDIAN_VAULT_PATH`: Absolute path to Obsidian vault
 - `OBSIDIAN_ATTACHMENTS_FOLDER`: Relative path for audio files (default: "attachments")
 - `OBSIDIAN_DIARY_FOLDER`: Relative path for daily notes (default: "diary")
