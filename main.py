@@ -7,6 +7,13 @@ import hashlib
 import json
 
 from openai import OpenAI
+from rich.console import Console
+from rich.table import Table
+from rich.panel import Panel
+from rich.text import Text
+
+
+console = Console()
 
 
 class Config:
@@ -16,14 +23,14 @@ class Config:
         self.attachments_folder = os.environ.get("OBSIDIAN_ATTACHMENTS_FOLDER", "attachments")
         self.diary_folder = os.environ.get("OBSIDIAN_DIARY_FOLDER", "diary")
         self.notes_folder = os.environ.get("OBSIDIAN_NOTES_FOLDER", "notes/memos")
-        self.voice_memos_path = Path("/Users/guistiebler/Downloads/audios")
+        self.voice_memos_path = Path("/Users/guistiebler/Library/Group Containers/group.com.apple.VoiceMemos.shared/Recordings")
         
         # Parse date filter if provided
         date_filter_str = os.environ.get("PROCESS_FILES_AFTER_DATE")
         if date_filter_str:
             try:
                 self.process_after_date = datetime.strptime(date_filter_str, "%Y-%m-%d")
-                print(f"Processing files created after: {self.process_after_date.strftime('%Y-%m-%d')}")
+                console.print(f"[cyan]Processing files created after:[/cyan] {self.process_after_date.strftime('%Y-%m-%d')}")
             except ValueError:
                 raise ValueError(f"PROCESS_FILES_AFTER_DATE '{date_filter_str}' must be in YYYY-MM-DD format")
         else:
@@ -67,15 +74,15 @@ class MemoProcessor:
         
         # Scan all audio files in the attachments folder
         if self.config.attachments_path.exists():
-            for audio_file in self.config.attachments_path.glob("*.m4a"):
-                try:
-                    file_hash = self._get_file_hash(audio_file)
-                    self.processed_files.add(file_hash)
-                except Exception as e:
-                    print(f"Warning: Could not hash {audio_file.name}: {e}")
+            with console.status("[bold green]Scanning existing audio files...", spinner="dots"):
+                for audio_file in self.config.attachments_path.glob("*.m4a"):
+                    try:
+                        file_hash = self._get_file_hash(audio_file)
+                        self.processed_files.add(file_hash)
+                    except Exception as e:
+                        console.print(f"[yellow]Warning:[/yellow] Could not hash {audio_file.name}: {e}")
         
-        print(f"Found {len(self.processed_files)} existing audio files in attachments folder")
-    
+        console.print(f"[green]✓[/green] Found [bold]{len(self.processed_files)}[/bold] existing audio files in attachments folder")
     
     def _get_file_hash(self, file_path: Path) -> str:
         with open(file_path, 'rb') as f:
@@ -85,47 +92,48 @@ class MemoProcessor:
         memo_files = list(self.config.voice_memos_path.glob("*.m4a"))
         unprocessed = []
         
-        for memo_file in memo_files:
-            # Check date filter first
-            if self.config.process_after_date:
-                creation_date = self.get_file_creation_date(memo_file)
-                if creation_date < self.config.process_after_date:
-                    continue  # Skip files created before the cutoff date
-            
-            # Check if already processed
-            file_hash = self._get_file_hash(memo_file)
-            if file_hash not in self.processed_files:
-                unprocessed.append(memo_file)
+        with console.status("[bold green]Filtering voice memos...", spinner="dots"):
+            for memo_file in memo_files:
+                # Check date filter first
+                if self.config.process_after_date:
+                    creation_date = self.get_file_creation_date(memo_file)
+                    if creation_date < self.config.process_after_date:
+                        continue  # Skip files created before the cutoff date
+                
+                # Check if already processed
+                file_hash = self._get_file_hash(memo_file)
+                if file_hash not in self.processed_files:
+                    unprocessed.append(memo_file)
         
         return unprocessed
     
     def transcribe_audio(self, audio_file: Path) -> str:
-        print(f"Transcribing {audio_file.name}...")
-        try:
-            with open(audio_file, "rb") as f:
-                transcript = self.client.audio.transcriptions.create(
-                    model="whisper-1",
-                    file=f,
-                    response_format="text"
-                )
-            return transcript
-        except Exception as e:
-            print(f"Error transcribing {audio_file.name}: {e}")
-            raise
+        with console.status(f"[bold blue]Transcribing {audio_file.name}...[/bold blue]", spinner="dots"):
+            try:
+                with open(audio_file, "rb") as f:
+                    transcript = self.client.audio.transcriptions.create(
+                        model="whisper-1",
+                        file=f,
+                        response_format="text"
+                    )
+                return transcript
+            except Exception as e:
+                console.print(f"[red]Error transcribing {audio_file.name}: {e}[/red]")
+                raise
     
     def generate_summary_and_title(self, transcription: str) -> Dict[str, str]:
-        print("Generating summary and title...")
-        try:
-            response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are a helpful assistant that creates concise summaries and titles for voice memos."
-                    },
-                    {
-                        "role": "user",
-                        "content": f"""Based on this transcription, provide:
+        with console.status("[bold blue]Generating summary and title...[/bold blue]", spinner="dots"):
+            try:
+                response = self.client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "You are a helpful assistant that creates concise summaries and titles for voice memos."
+                        },
+                        {
+                            "role": "user",
+                            "content": f"""Based on this transcription, provide:
 1. A one-line summary (max 50 characters, suitable for a filename)
 2. A longer summary (2-3 sentences)
 3. A title for the note
@@ -134,19 +142,19 @@ Transcription:
 {transcription}
 
 Please respond in JSON format with keys: "filename_summary", "summary", "title"."""
-                    }
-                ],
-                response_format={ "type": "json_object" }
-            )
-            
-            content = response.choices[0].message.content
-            if content is None:
-                raise ValueError("No content in API response")
-            result = json.loads(content)
-            return result
-        except Exception as e:
-            print(f"Error generating summary: {e}")
-            raise
+                        }
+                    ],
+                    response_format={ "type": "json_object" }
+                )
+                
+                content = response.choices[0].message.content
+                if content is None:
+                    raise ValueError("No content in API response")
+                result = json.loads(content)
+                return result
+            except Exception as e:
+                console.print(f"[red]Error generating summary: {e}[/red]")
+                raise
     
     def sanitize_filename(self, filename: str) -> str:
         invalid_chars = '<>:"/\\|?*'
@@ -163,8 +171,10 @@ Please respond in JSON format with keys: "filename_summary", "summary", "title".
         new_filename = f"{timestamp}_{sanitized_name}.m4a"
         destination = self.config.attachments_path / new_filename
         
-        print(f"Copying audio file to {destination.name}...")
-        shutil.copy2(source_file, destination)
+        with console.status("[bold cyan]Copying audio file...", spinner="dots"):
+            shutil.copy2(source_file, destination)
+        
+        console.print(f"  [green]✓[/green] Audio saved as: [italic]{new_filename}[/italic]")
         return destination
     
     def create_obsidian_note(self, title: str, summary: str, transcription: str, 
@@ -179,7 +189,7 @@ Please respond in JSON format with keys: "filename_summary", "summary", "title".
         note_content = f"""# {title}
 
 **Date:** {creation_date.strftime("%Y-%m-%d %H:%M:%S")}
-**Audio:** [[{relative_audio_path}]]
+![[{relative_audio_path}]]
 
 ## Summary
 {summary}
@@ -191,10 +201,11 @@ Please respond in JSON format with keys: "filename_summary", "summary", "title".
 *Generated automatically from voice memo*
 """
         
-        print(f"Creating note: {note_filename}...")
-        with open(note_path, 'w', encoding='utf-8') as f:
-            f.write(note_content)
+        with console.status("[bold cyan]Creating note...", spinner="dots"):
+            with open(note_path, 'w', encoding='utf-8') as f:
+                f.write(note_content)
         
+        console.print(f"  [green]✓[/green] Note created: [italic]{note_filename}[/italic]")
         return note_path
     
     def update_daily_note(self, date: datetime, note_path: Path):
@@ -204,36 +215,40 @@ Please respond in JSON format with keys: "filename_summary", "summary", "title".
         relative_note_path = os.path.relpath(note_path, self.config.obsidian_vault_path)
         note_link = f"- [[{relative_note_path.replace('.md', '')}]]"
         
-        if daily_note_path.exists():
-            print(f"Updating daily note: {daily_note_filename}...")
-            with open(daily_note_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            
-            if "## Voice Memos" not in content:
-                content += "\n\n## Voice Memos\n"
-            
-            content += f"{note_link}\n"
-            
-            with open(daily_note_path, 'w', encoding='utf-8') as f:
-                f.write(content)
-        else:
-            print(f"Creating daily note: {daily_note_filename}...")
-            content = f"""# {date.strftime("%Y-%m-%d")}
+        with console.status("[bold cyan]Updating daily note...", spinner="dots"):
+            if daily_note_path.exists():
+                with open(daily_note_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                
+                if "## Voice Memos" not in content:
+                    content += "\n\n## Voice Memos\n"
+                
+                content += f"{note_link}\n"
+                
+                with open(daily_note_path, 'w', encoding='utf-8') as f:
+                    f.write(content)
+                console.print(f"  [green]✓[/green] Updated daily note: [italic]{daily_note_filename}[/italic]")
+            else:
+                content = f"""# {date.strftime("%Y-%m-%d")}
 
 ## Voice Memos
 {note_link}
 """
-            with open(daily_note_path, 'w', encoding='utf-8') as f:
-                f.write(content)
+                with open(daily_note_path, 'w', encoding='utf-8') as f:
+                    f.write(content)
+                console.print(f"  [green]✓[/green] Created daily note: [italic]{daily_note_filename}[/italic]")
     
     def get_file_creation_date(self, file_path: Path) -> datetime:
         stat = file_path.stat()
         return datetime.fromtimestamp(stat.st_birthtime if hasattr(stat, 'st_birthtime') else stat.st_mtime)
     
-    def process_memo(self, memo_file: Path):
-        print(f"\n{'='*50}")
-        print(f"Processing: {memo_file.name}")
-        print(f"{'='*50}")
+    def process_memo(self, memo_file: Path, index: int, total: int):
+        panel = Panel(
+            f"[bold]Processing:[/bold] {memo_file.name}\n[dim]({index}/{total})[/dim]",
+            style="bright_blue",
+            expand=False
+        )
+        console.print(panel)
         
         try:
             creation_date = self.get_file_creation_date(memo_file)
@@ -241,10 +256,18 @@ Please respond in JSON format with keys: "filename_summary", "summary", "title".
             transcription = self.transcribe_audio(memo_file)
             
             if not transcription.strip():
-                print("Empty transcription, skipping...")
+                console.print("[yellow]  ⚠ Empty transcription, skipping...[/yellow]")
                 return
             
             summary_data = self.generate_summary_and_title(transcription)
+            
+            # Display summary info
+            summary_table = Table(show_header=False, box=None, padding=(0, 1))
+            summary_table.add_column(style="bold cyan", width=12)
+            summary_table.add_column()
+            summary_table.add_row("Title:", summary_data.get("title", "Voice Memo"))
+            summary_table.add_row("Summary:", Text(summary_data.get("summary", "")[:100] + "...", style="italic"))
+            console.print(summary_table)
             
             copied_audio = self.copy_audio_file(
                 memo_file, 
@@ -265,26 +288,37 @@ Please respond in JSON format with keys: "filename_summary", "summary", "title".
             file_hash = self._get_file_hash(memo_file)
             self.processed_files.add(file_hash)
             
-            print(f"✓ Successfully processed {memo_file.name}")
+            console.print(f"[bold green]✓ Successfully processed {memo_file.name}[/bold green]\n")
             
         except Exception as e:
-            print(f"✗ Error processing {memo_file.name}: {e}")
+            console.print(f"[bold red]✗ Error processing {memo_file.name}: {e}[/bold red]\n")
     
     def process_all_memos(self):
+        console.print(Panel.fit(
+            "[bold cyan]Voice Memo Transcription to Obsidian[/bold cyan]",
+            style="bright_blue"
+        ))
+        
         unprocessed = self.get_unprocessed_memos()
         
         if not unprocessed:
-            print("No new memos to process.")
+            console.print("[yellow]No new memos to process.[/yellow]")
             return
         
-        print(f"Found {len(unprocessed)} unprocessed memo(s)")
+        console.print(f"\n[bold green]Found {len(unprocessed)} unprocessed memo(s)[/bold green]\n")
         
-        for memo_file in unprocessed:
-            self.process_memo(memo_file)
+        for index, memo_file in enumerate(unprocessed, 1):
+            self.process_memo(memo_file, index, len(unprocessed))
         
-        print(f"\n{'='*50}")
-        print(f"Processing complete! Processed {len(unprocessed)} memo(s)")
-        print(f"{'='*50}")
+        # Summary table
+        summary = Table(title="Processing Complete", style="green")
+        summary.add_column("Metric", style="cyan")
+        summary.add_column("Value", style="bold")
+        summary.add_row("Memos Processed", str(len(unprocessed)))
+        summary.add_row("Total Existing Files", str(len(self.processed_files)))
+        
+        console.print("\n")
+        console.print(summary)
 
 
 def main():
@@ -293,18 +327,19 @@ def main():
         processor = MemoProcessor(config)
         processor.process_all_memos()
     except ValueError as e:
-        print(f"Configuration error: {e}")
-        print("\nPlease ensure the following environment variables are set:")
-        print("  - OPENAI_API_KEY")
-        print("  - OBSIDIAN_VAULT_PATH")
-        print("  - OBSIDIAN_ATTACHMENTS_FOLDER (optional)")
-        print("  - OBSIDIAN_DIARY_FOLDER (optional)")
-        print("  - OBSIDIAN_NOTES_FOLDER (optional)")
-        print("  - PROCESS_FILES_AFTER_DATE (optional, format: YYYY-MM-DD)")
+        console.print(f"[bold red]Configuration error:[/bold red] {e}")
+        console.print("\n[yellow]Please ensure the following environment variables are set:[/yellow]")
+        console.print("  • OPENAI_API_KEY")
+        console.print("  • OBSIDIAN_VAULT_PATH")
+        console.print("  • OBSIDIAN_ATTACHMENTS_FOLDER (optional)")
+        console.print("  • OBSIDIAN_DIARY_FOLDER (optional)")
+        console.print("  • OBSIDIAN_NOTES_FOLDER (optional)")
+        console.print("  • PROCESS_FILES_AFTER_DATE (optional, format: YYYY-MM-DD)")
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Process interrupted by user[/yellow]")
     except Exception as e:
-        print(f"Unexpected error: {e}")
-        import traceback
-        traceback.print_exc()
+        console.print(f"[bold red]Unexpected error:[/bold red] {e}")
+        console.print_exception()
 
 
 if __name__ == "__main__":
