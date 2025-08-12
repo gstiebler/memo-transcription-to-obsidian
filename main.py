@@ -16,7 +16,7 @@ class Config:
         self.attachments_folder = os.environ.get("OBSIDIAN_ATTACHMENTS_FOLDER", "attachments")
         self.diary_folder = os.environ.get("OBSIDIAN_DIARY_FOLDER", "diary")
         self.notes_folder = os.environ.get("OBSIDIAN_NOTES_FOLDER", "notes/memos")
-        self.voice_memos_path = Path("/Users/guistiebler/Library/Group Containers/group.com.apple.VoiceMemos.shared/Recordings")
+        self.voice_memos_path = Path("/Users/guistiebler/Downloads/audios")
         
         # Parse date filter if provided
         date_filter_str = os.environ.get("PROCESS_FILES_AFTER_DATE")
@@ -62,17 +62,20 @@ class MemoProcessor:
         self.config.notes_path.mkdir(parents=True, exist_ok=True)
     
     def _load_processed_files(self):
-        cache_file = self.config.obsidian_vault_path / ".memo_processor_cache.json"
-        if cache_file.exists():
-            with open(cache_file, 'r') as f:
-                self.processed_files = set(json.load(f))
-        else:
-            self.processed_files = set()
+        # Build hash set from existing files in attachments folder
+        self.processed_files = set()
+        
+        # Scan all audio files in the attachments folder
+        if self.config.attachments_path.exists():
+            for audio_file in self.config.attachments_path.glob("*.m4a"):
+                try:
+                    file_hash = self._get_file_hash(audio_file)
+                    self.processed_files.add(file_hash)
+                except Exception as e:
+                    print(f"Warning: Could not hash {audio_file.name}: {e}")
+        
+        print(f"Found {len(self.processed_files)} existing audio files in attachments folder")
     
-    def _save_processed_files(self):
-        cache_file = self.config.obsidian_vault_path / ".memo_processor_cache.json"
-        with open(cache_file, 'w') as f:
-            json.dump(list(self.processed_files), f)
     
     def _get_file_hash(self, file_path: Path) -> str:
         with open(file_path, 'rb') as f:
@@ -258,9 +261,9 @@ Please respond in JSON format with keys: "filename_summary", "summary", "title".
             
             self.update_daily_note(creation_date, note_path)
             
+            # Add the hash to our in-memory set (for this session only)
             file_hash = self._get_file_hash(memo_file)
             self.processed_files.add(file_hash)
-            self._save_processed_files()
             
             print(f"✓ Successfully processed {memo_file.name}")
             
